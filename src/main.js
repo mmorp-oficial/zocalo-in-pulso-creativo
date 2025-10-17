@@ -1,116 +1,241 @@
 import * as THREE from "three";
 import { SplatMesh } from "@sparkjsdev/spark";
 
+// ============================================================================
+// INITIALIZATION
+// ============================================================================
+
 const app = document.getElementById("app");
 const W = window.innerWidth;
 const H = window.innerHeight;
 
-// --- Scene & Renderer ---
+// Scene & Renderer
 const scene = new THREE.Scene();
-
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(W, H);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
 app.appendChild(renderer.domElement);
 
-// --- Sky (equirectangular 360) ---
-const loader = new THREE.TextureLoader();
-loader.load(
-  "/panos/panoramaSky.png",
-  (pano) => {
-    // correct color and mapping for a pano
-    pano.colorSpace = THREE.SRGBColorSpace;
-    pano.mapping = THREE.EquirectangularReflectionMapping;
+// ============================================================================
+// LOADING SCREEN
+// ============================================================================
 
-    // set as background
-    scene.background = pano;
-  },
-  undefined,
-  (err) => console.warn("Sky load error:", err)
-);
+const loadingScreen = document.createElement("div");
+loadingScreen.style.cssText = `
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.9);
+  backdrop-filter: blur(10px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  transition: opacity 0.5s ease;
+`;
 
-// Make sure your renderer is in sRGB for correct colors:
-renderer.outputColorSpace = THREE.SRGBColorSpace;
+const spinner = document.createElement("div");
+spinner.style.cssText = `
+  width: 60px;
+  height: 60px;
+  border: 4px solid rgba(255, 255, 255, 0.3);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+`;
 
-// --- Lights ---
-scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-const dir = new THREE.DirectionalLight(0xffffff, 0.8);
-dir.position.set(5, 10, 5);
-scene.add(dir);
+const loadingText = document.createElement("div");
+loadingText.textContent = "CAMMARQ";
+loadingText.style.cssText = `
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 600;
+  font-family: system-ui, -apple-system, sans-serif;
+  letter-spacing: 4px;
+  margin-top: 24px;
+`;
 
-// --- Ground PBR (albedo + normal + roughness + AO), tiled 6x6 ---
-const texLoader = new THREE.TextureLoader();
-const TILES_U = 64,
-  TILES_V = 64;
+const loadingSubtext = document.createElement("div");
+loadingSubtext.textContent = "Construyendo el Futuro";
+loadingSubtext.style.cssText = `
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 14px;
+  font-weight: 400;
+  font-family: system-ui, -apple-system, sans-serif;
+  letter-spacing: 1px;
+  margin-top: 8px;
+`;
 
-// helper: wrap + repeat + (optional) sRGB
-function prepTexture(tex, srgb = false) {
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(TILES_U, TILES_V);
-  if (srgb) {
-    if ("outputColorSpace" in renderer) tex.colorSpace = THREE.SRGBColorSpace;
-    else tex.encoding = THREE.sRGBEncoding;
+// Add spinner animation
+const style = document.createElement("style");
+style.textContent = `
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
-  return tex;
+`;
+document.head.appendChild(style);
+
+loadingScreen.appendChild(spinner);
+loadingScreen.appendChild(loadingText);
+loadingScreen.appendChild(loadingSubtext);
+document.body.appendChild(loadingScreen);
+
+// Loading manager
+let assetsToLoad = 0;
+let assetsLoaded = 0;
+
+function incrementAssetsToLoad() {
+  assetsToLoad++;
 }
 
-// load textures
-const albedo = prepTexture(
-  texLoader.load("/textures/zocalo_Albedo.webp"),
-  true
-); // color → sRGB
-const normal = prepTexture(texLoader.load("/textures/zocalo_Normal.webp")); // linear
-const rough = prepTexture(texLoader.load("/textures/zocalo_Roughness.webp")); // linear
-const ao = prepTexture(texLoader.load("/textures/zocalo_AO.webp")); // linear
+function incrementAssetsLoaded() {
+  assetsLoaded++;
+  if (assetsLoaded >= assetsToLoad) {
+    hideLoadingScreen();
+  }
+}
 
-// geometry (uv + uv2 needed for AO)
-const groundGeo = new THREE.PlaneGeometry(20, 20);
+function hideLoadingScreen() {
+  loadingScreen.style.opacity = "0";
+  setTimeout(() => {
+    loadingScreen.remove();
+  }, 500);
+}
 
-// copy uv to uv2 so aoMap works
-groundGeo.setAttribute(
-  "uv2",
-  new THREE.BufferAttribute(groundGeo.attributes.uv.array, 2)
+// ============================================================================
+// SKY (360 PANORAMA)
+// ============================================================================
+
+incrementAssetsToLoad();
+const skyLoader = new THREE.TextureLoader();
+skyLoader.load(
+  "/panos/panoramaSky.png",
+  (pano) => {
+    pano.colorSpace = THREE.SRGBColorSpace;
+    pano.mapping = THREE.EquirectangularReflectionMapping;
+    scene.background = pano;
+    incrementAssetsLoaded();
+  },
+  undefined,
+  (err) => {
+    console.warn("Sky load error:", err);
+    incrementAssetsLoaded();
+  }
 );
 
-const groundMat = new THREE.MeshStandardMaterial({
-  map: albedo,
-  normalMap: normal,
-  roughnessMap: rough,
-  aoMap: ao,
+// ============================================================================
+// LIGHTS
+// ============================================================================
+
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+directionalLight.position.set(5, 10, 5);
+scene.add(directionalLight);
+
+// ============================================================================
+// GROUND (PBR TEXTURED PLANE)
+// ============================================================================
+
+const TILES_U = 64;
+const TILES_V = 64;
+
+function prepareTexture(texture, useSRGB = false) {
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(TILES_U, TILES_V);
+  if (useSRGB) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
+  texture.anisotropy = 8;
+  return texture;
+}
+
+const textureLoader = new THREE.TextureLoader();
+
+// Load ground textures
+incrementAssetsToLoad();
+incrementAssetsToLoad();
+incrementAssetsToLoad();
+incrementAssetsToLoad();
+
+const albedoMap = textureLoader.load("/textures/zocalo_Albedo.webp", () =>
+  incrementAssetsLoaded()
+);
+const normalMap = textureLoader.load("/textures/zocalo_Normal.webp", () =>
+  incrementAssetsLoaded()
+);
+const roughnessMap = textureLoader.load("/textures/zocalo_Roughness.webp", () =>
+  incrementAssetsLoaded()
+);
+const aoMap = textureLoader.load("/textures/zocalo_AO.webp", () =>
+  incrementAssetsLoaded()
+);
+
+prepareTexture(albedoMap, true);
+prepareTexture(normalMap, false);
+prepareTexture(roughnessMap, false);
+prepareTexture(aoMap, false);
+
+const groundGeometry = new THREE.PlaneGeometry(20, 20);
+groundGeometry.setAttribute(
+  "uv2",
+  new THREE.BufferAttribute(groundGeometry.attributes.uv.array, 2)
+);
+
+const groundMaterial = new THREE.MeshStandardMaterial({
+  map: albedoMap,
+  normalMap: normalMap,
+  roughnessMap: roughnessMap,
+  aoMap: aoMap,
   metalness: 0.0,
-  roughness: 1.0, // multiplier with roughnessMap
+  roughness: 1.0,
   normalScale: new THREE.Vector2(1, 1),
-  aoMapIntensity: 0.8, // tweak 0–1 if AO feels heavy
+  aoMapIntensity: 0.8,
 });
 
-const ground = new THREE.Mesh(groundGeo, groundMat);
+const ground = new THREE.Mesh(groundGeometry, groundMaterial);
 ground.rotation.x = -Math.PI / 2;
 ground.receiveShadow = true;
 scene.add(ground);
 
-// Optional: better glancing-angle quality
-albedo.anisotropy = normal.anisotropy = rough.anisotropy = ao.anisotropy = 8;
+// ============================================================================
+// PLAYER & CAMERA
+// ============================================================================
 
-// --- Player (XZ-only movement) + Camera ---
-const EYE_HEIGHT = 0.15; // meters-ish
+const EYE_HEIGHT = 0.15;
+const MOVE_SPEED = 1.0;
+const MOUSE_SENSITIVITY = 0.002;
+const MOVEMENT_BOUNDS = { x: 4, z: 3 };
+
 const player = new THREE.Object3D();
-player.position.set(0, 0, 1.5); // start position on the plane
+player.position.set(0, 0, 1.5);
 
 const camera = new THREE.PerspectiveCamera(60, W / H, 0.1, 1000);
-camera.position.set(0, EYE_HEIGHT, 0); // eye height relative to player
+camera.position.set(0, EYE_HEIGHT, 0);
 player.add(camera);
 scene.add(player);
 
-// --- SparkJS Splat ---
-const splat = new SplatMesh({
-  url: "/splats/splatZocalo.ply", // put file under /public/splats/
-  onLoad: () => console.log("Splat ready"),
-});
-splat.position.set(0, 0.25, 0);
-splat.rotateX(Math.PI);
-scene.add(splat);
+// ============================================================================
+// GAUSSIAN SPLATS
+// ============================================================================
 
-// ---- Quadrant placer for SparkJS splats ----
+// Main splat
+incrementAssetsToLoad();
+const mainSplat = new SplatMesh({
+  url: "/splats/splatZocalo.ply",
+  onLoad: () => {
+    console.log("Main splat loaded");
+    incrementAssetsLoaded();
+  },
+});
+mainSplat.position.set(0, 0.25, 0);
+mainSplat.rotateX(Math.PI);
+scene.add(mainSplat);
+
+// Helper function to place splats in quadrants
 function placeSplatInQuadrants({
   url,
   distance = 2,
@@ -125,52 +250,81 @@ function placeSplatInQuadrants({
     [-distance - 1, y, -distance], // Q3
     [+distance + 1, y, -distance], // Q4
   ];
-  positions.forEach((p, i) => {
-    const m = new SplatMesh({
+
+  positions.forEach((pos, idx) => {
+    incrementAssetsToLoad();
+    const mesh = new SplatMesh({
       url,
-      onLoad: () => console.log("Splat ready:", url, "idx", i),
+      onLoad: () => {
+        console.log(`Splat loaded: ${url} [${idx}]`);
+        incrementAssetsLoaded();
+      },
     });
-    m.position.set(p[0], p[1], p[2]);
-    if (rotateXPi) m.rotateX(Math.PI); // keep if your splats appear upside down
-    if (scale !== 1) m.scale.setScalar(scale);
-    group.add(m);
+    mesh.position.set(pos[0], pos[1], pos[2]);
+    if (rotateXPi) mesh.rotateX(Math.PI);
+    if (scale !== 1) mesh.scale.setScalar(scale);
+    group.add(mesh);
   });
+
   scene.add(group);
   return group;
 }
 
-// ---------- MODE A: four copies per file (8 total) ----------
-const pegasoSet = placeSplatInQuadrants({
+// Pegaso splats (4 copies)
+const pegasoGroup = placeSplatInQuadrants({
   url: "/splats/PegasoPLY.ply",
 });
 
-//
-
-const bancaA = new SplatMesh({ url: "/splats/bancaPLY.ply" });
+// Banca splats (2 copies)
+incrementAssetsToLoad();
+const bancaA = new SplatMesh({
+  url: "/splats/bancaPLY.ply",
+  onLoad: () => {
+    console.log("Banca A loaded");
+    incrementAssetsLoaded();
+  },
+});
 bancaA.position.set(0, 0.25, 0.0);
 bancaA.rotateX(Math.PI);
 scene.add(bancaA);
 
-const bancaB = new SplatMesh({ url: "/splats/bancaPLY.ply" });
+incrementAssetsToLoad();
+const bancaB = new SplatMesh({
+  url: "/splats/bancaPLY.ply",
+  onLoad: () => {
+    console.log("Banca B loaded");
+    incrementAssetsLoaded();
+  },
+});
 bancaB.position.copy(bancaA.position);
 bancaB.rotateZ(Math.PI);
 scene.add(bancaB);
 
-//
+// ============================================================================
+// POINTER LOCK CONTROLS
+// ============================================================================
 
-// --- Pointer Lock (mouse look) ---
 let isLocked = false;
-let yaw = 0; // horizontal rotation
-let pitch = 0; // vertical rotation (camera only; movement stays flat)
+let yaw = 0;
+let pitch = 0;
 
-// helper: show a small hint until locked
-const hint = document.createElement("div");
-hint.textContent = "Click to move • WASD/Arrows + Mouse • Esc to unlock";
-hint.style.cssText =
-  "position:fixed;left:50%;transform:translateX(-50%);bottom:16px;" +
-  "padding:8px 12px;background:rgba(20,24,28,.7);color:#fff;border-radius:8px;" +
-  "font:12px/1.2 system-ui, sans-serif;z-index:1000;user-select:none";
-document.body.appendChild(hint);
+const controlsHint = document.createElement("div");
+controlsHint.textContent =
+  "Click to move • WASD/Arrows + Mouse • Esc to unlock";
+controlsHint.style.cssText = `
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 16px;
+  padding: 8px 12px;
+  background: rgba(20, 24, 28, 0.7);
+  color: #fff;
+  border-radius: 8px;
+  font: 12px/1.2 system-ui, sans-serif;
+  z-index: 1000;
+  user-select: none;
+`;
+document.body.appendChild(controlsHint);
 
 renderer.domElement.addEventListener("click", () => {
   renderer.domElement.requestPointerLock();
@@ -178,80 +332,110 @@ renderer.domElement.addEventListener("click", () => {
 
 document.addEventListener("pointerlockchange", () => {
   isLocked = document.pointerLockElement === renderer.domElement;
-  hint.style.display = isLocked ? "none" : "block";
+  controlsHint.style.display = isLocked ? "none" : "block";
 });
 
 document.addEventListener("mousemove", (e) => {
   if (!isLocked) return;
-  const sensitivity = 0.002; // lower = slower
-  yaw -= e.movementX * sensitivity;
-  pitch -= e.movementY * sensitivity;
-  // clamp pitch so you can't flip over
-  const lim = Math.PI / 2 - 0.01;
-  pitch = Math.max(-lim, Math.min(lim, pitch));
 
-  // apply rotations: player yaw; camera pitch
+  yaw -= e.movementX * MOUSE_SENSITIVITY;
+  pitch -= e.movementY * MOUSE_SENSITIVITY;
+
+  // Clamp pitch to prevent flipping
+  const pitchLimit = Math.PI / 2 - 0.01;
+  pitch = Math.max(-pitchLimit, Math.min(pitchLimit, pitch));
+
   player.rotation.y = yaw;
   camera.rotation.x = pitch;
 });
 
-// --- Keyboard movement (XZ only) ---
-const keys = { f: false, b: false, l: false, r: false };
-const setKey = (code, pressed) => {
-  if (code === "KeyW" || code === "ArrowUp") keys.f = pressed;
-  if (code === "KeyS" || code === "ArrowDown") keys.b = pressed;
-  if (code === "KeyA" || code === "ArrowLeft") keys.l = pressed;
-  if (code === "KeyD" || code === "ArrowRight") keys.r = pressed;
-};
-document.addEventListener("keydown", (e) => setKey(e.code, true));
-document.addEventListener("keyup", (e) => setKey(e.code, false));
+// ============================================================================
+// KEYBOARD MOVEMENT
+// ============================================================================
 
-// --- Movement update ---
+const keys = { forward: false, backward: false, left: false, right: false };
+
+function handleKeyEvent(code, pressed) {
+  switch (code) {
+    case "KeyW":
+    case "ArrowUp":
+      keys.forward = pressed;
+      break;
+    case "KeyS":
+    case "ArrowDown":
+      keys.backward = pressed;
+      break;
+    case "KeyA":
+    case "ArrowLeft":
+      keys.left = pressed;
+      break;
+    case "KeyD":
+    case "ArrowRight":
+      keys.right = pressed;
+      break;
+  }
+}
+
+document.addEventListener("keydown", (e) => handleKeyEvent(e.code, true));
+document.addEventListener("keyup", (e) => handleKeyEvent(e.code, false));
+
+// ============================================================================
+// MOVEMENT UPDATE
+// ============================================================================
+
 const clock = new THREE.Clock();
-const SPEED = 1.0; // units/second
 const worldUp = new THREE.Vector3(0, 1, 0);
-const tmp = new THREE.Vector3();
+const moveDirection = new THREE.Vector3();
 
-function updateMovement(dt) {
-  tmp.set(0, 0, 0);
-  if (keys.f) tmp.z -= 1;
-  if (keys.b) tmp.z += 1;
-  if (keys.l) tmp.x -= 1;
-  if (keys.r) tmp.x += 1;
+function updateMovement(deltaTime) {
+  moveDirection.set(0, 0, 0);
 
-  if (tmp.lengthSq() > 0) {
-    tmp.normalize();
+  if (keys.forward) moveDirection.z -= 1;
+  if (keys.backward) moveDirection.z += 1;
+  if (keys.left) moveDirection.x -= 1;
+  if (keys.right) moveDirection.x += 1;
 
-    // rotate by yaw only so movement stays horizontal
-    tmp.applyAxisAngle(worldUp, player.rotation.y);
+  if (moveDirection.lengthSq() > 0) {
+    moveDirection.normalize();
+    moveDirection.applyAxisAngle(worldUp, player.rotation.y);
+    player.position.addScaledVector(moveDirection, MOVE_SPEED * deltaTime);
 
-    // scale by speed and delta
-    player.position.addScaledVector(tmp, SPEED * dt);
-
-    // keep on the plane (no vertical movement)
+    // Keep player on horizontal plane (no vertical movement)
     player.position.y = 0;
   }
 
-  // optional simple bounds so you don't walk off the demo ground
-  const limit = 4;
-  player.position.x = Math.max(-limit, Math.min(limit, player.position.x));
-  player.position.z = Math.max(-limit, Math.min(3, player.position.z));
+  // Apply movement bounds
+  player.position.x = Math.max(
+    -MOVEMENT_BOUNDS.x,
+    Math.min(MOVEMENT_BOUNDS.x, player.position.x)
+  );
+  player.position.z = Math.max(
+    -MOVEMENT_BOUNDS.x,
+    Math.min(MOVEMENT_BOUNDS.z, player.position.z)
+  );
 }
 
-// --- Animate ---
+// ============================================================================
+// ANIMATION LOOP
+// ============================================================================
+
 function animate() {
   requestAnimationFrame(animate);
-  const dt = clock.getDelta();
-  updateMovement(dt);
+  const deltaTime = clock.getDelta();
+  updateMovement(deltaTime);
   renderer.render(scene, camera);
 }
+
 animate();
 
-// --- Resize ---
+// ============================================================================
+// WINDOW RESIZE
+// ============================================================================
+
 window.addEventListener("resize", () => {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
-  camera.aspect = w / h;
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  camera.aspect = width / height;
   camera.updateProjectionMatrix();
-  renderer.setSize(w, h);
+  renderer.setSize(width, height);
 });
