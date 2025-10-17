@@ -308,6 +308,21 @@ let isLocked = false;
 let yaw = 0;
 let pitch = 0;
 
+// Logo overlay
+const logoOverlay = document.createElement("img");
+logoOverlay.src = "/textures/logo.png";
+logoOverlay.style.cssText = `
+  position: fixed;
+  top: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  height: 120px;
+  z-index: 1000;
+  user-select: none;
+  pointer-events: none;
+`;
+document.body.appendChild(logoOverlay);
+
 const controlsHint = document.createElement("div");
 controlsHint.textContent =
   "Click to move • WASD/Arrows + Mouse • Esc to unlock";
