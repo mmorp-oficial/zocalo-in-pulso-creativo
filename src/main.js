@@ -301,12 +301,75 @@ bancaB.rotateZ(Math.PI);
 scene.add(bancaB);
 
 // ============================================================================
-// POINTER LOCK CONTROLS
+// POINTER LOCK CONTROLS & DEVICE ORIENTATION
 // ============================================================================
 
 let isLocked = false;
 let yaw = 0;
 let pitch = 0;
+
+// Device orientation (for mobile)
+let useDeviceOrientation = false;
+let deviceAlpha = 0;
+let deviceBeta = 0;
+let deviceGamma = 0;
+
+// Detect if device has orientation sensors
+function checkDeviceOrientation() {
+  if (
+    typeof DeviceOrientationEvent !== "undefined" &&
+    typeof DeviceOrientationEvent.requestPermission === "function"
+  ) {
+    // iOS 13+ requires permission
+    return true;
+  } else if (window.DeviceOrientationEvent) {
+    // Android and older iOS
+    return true;
+  }
+  return false;
+}
+
+const isMobile =
+  /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+    navigator.userAgent
+  );
+const hasOrientationSensor = checkDeviceOrientation();
+
+// Request device orientation permission (iOS 13+)
+async function requestOrientationPermission() {
+  if (
+    typeof DeviceOrientationEvent !== "undefined" &&
+    typeof DeviceOrientationEvent.requestPermission === "function"
+  ) {
+    try {
+      const permission = await DeviceOrientationEvent.requestPermission();
+      if (permission === "granted") {
+        enableDeviceOrientation();
+      } else {
+        console.log("Device orientation permission denied");
+      }
+    } catch (error) {
+      console.error("Error requesting device orientation permission:", error);
+    }
+  } else {
+    // No permission needed (Android or older iOS)
+    enableDeviceOrientation();
+  }
+}
+
+function enableDeviceOrientation() {
+  useDeviceOrientation = true;
+  window.addEventListener("deviceorientation", handleDeviceOrientation, true);
+  console.log("Device orientation enabled");
+}
+
+function handleDeviceOrientation(event) {
+  if (!useDeviceOrientation) return;
+
+  deviceAlpha = event.alpha || 0; // Z-axis (0-360)
+  deviceBeta = event.beta || 0; // X-axis (-180 to 180)
+  deviceGamma = event.gamma || 0; // Y-axis (-90 to 90)
+}
 
 // Logo overlay
 const logoOverlay = document.createElement("img");
@@ -316,7 +379,7 @@ logoOverlay.style.cssText = `
   top: 24px;
   left: 50%;
   transform: translateX(-50%);
-  height: 120px;
+  height: 80px;
   z-index: 1000;
   user-select: none;
   pointer-events: none;
@@ -324,8 +387,12 @@ logoOverlay.style.cssText = `
 document.body.appendChild(logoOverlay);
 
 const controlsHint = document.createElement("div");
-controlsHint.textContent =
-  "Click to move • WASD/Arrows + Mouse • Esc to unlock";
+if (isMobile && hasOrientationSensor) {
+  controlsHint.innerHTML = "Tap to enable gyroscope • WASD to move";
+} else {
+  controlsHint.textContent =
+    "Click to move • WASD/Arrows + Mouse • Esc to unlock";
+}
 controlsHint.style.cssText = `
   position: fixed;
   left: 50%;
@@ -338,20 +405,30 @@ controlsHint.style.cssText = `
   font: 12px/1.2 system-ui, sans-serif;
   z-index: 1000;
   user-select: none;
+  cursor: pointer;
 `;
 document.body.appendChild(controlsHint);
 
-renderer.domElement.addEventListener("click", () => {
-  renderer.domElement.requestPointerLock();
-});
+// Handle orientation permission request on mobile
+if (isMobile && hasOrientationSensor) {
+  controlsHint.addEventListener("click", async () => {
+    await requestOrientationPermission();
+    controlsHint.style.display = "none";
+  });
+} else {
+  // Desktop: pointer lock
+  renderer.domElement.addEventListener("click", () => {
+    renderer.domElement.requestPointerLock();
+  });
 
-document.addEventListener("pointerlockchange", () => {
-  isLocked = document.pointerLockElement === renderer.domElement;
-  controlsHint.style.display = isLocked ? "none" : "block";
-});
+  document.addEventListener("pointerlockchange", () => {
+    isLocked = document.pointerLockElement === renderer.domElement;
+    controlsHint.style.display = isLocked ? "none" : "block";
+  });
+}
 
 document.addEventListener("mousemove", (e) => {
-  if (!isLocked) return;
+  if (!isLocked || useDeviceOrientation) return;
 
   yaw -= e.movementX * MOUSE_SENSITIVITY;
   pitch -= e.movementY * MOUSE_SENSITIVITY;
@@ -402,7 +479,34 @@ const clock = new THREE.Clock();
 const worldUp = new THREE.Vector3(0, 1, 0);
 const moveDirection = new THREE.Vector3();
 
+function updateDeviceOrientationCamera() {
+  if (!useDeviceOrientation) return;
+
+  // Convert device orientation to radians
+  const alphaRad = THREE.MathUtils.degToRad(deviceAlpha);
+  const betaRad = THREE.MathUtils.degToRad(deviceBeta);
+  const gammaRad = THREE.MathUtils.degToRad(deviceGamma);
+
+  // Apply device orientation to camera
+  // Alpha controls horizontal rotation (yaw)
+  player.rotation.y = alphaRad;
+
+  // Beta controls vertical tilt (pitch)
+  // Adjust for device orientation (landscape/portrait)
+  const adjustedBeta = betaRad - Math.PI / 2;
+  camera.rotation.x = Math.max(
+    -Math.PI / 2,
+    Math.min(Math.PI / 2, adjustedBeta)
+  );
+
+  // Gamma can be used for roll if needed
+  camera.rotation.z = gammaRad;
+}
+
 function updateMovement(deltaTime) {
+  // Update camera from device orientation
+  updateDeviceOrientationCamera();
+
   moveDirection.set(0, 0, 0);
 
   if (keys.forward) moveDirection.z -= 1;
